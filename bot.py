@@ -1,12 +1,17 @@
 import requests
 import time
 import telegram
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Charge les variables du fichier .env
+
 
 # ==============================
 # CONFIGURATION
 # ==============================
 
-TELEGRAM_BOT_TOKEN = "7687859696:AAHG4HDNln_Nb_g679xzi6BjhpSa7HgZftk"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = "-4769470702"
 
 SOLANA_RPC_URL = "https://api.helius.xyz/v0/mainnet-rpc?api-key=ba1232d1-2f57-4cc5-a47f-1c50038a723e"

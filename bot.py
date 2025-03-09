@@ -4,14 +4,17 @@ import telegram
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # Charge les variables du fichier .env
-
+# Charger les variables du fichier .env
+load_dotenv()
 
 # ==============================
 # CONFIGURATION
 # ==============================
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("🚨 ERREUR : La variable TELEGRAM_BOT_TOKEN est vide ou non définie !")
+
 TELEGRAM_CHAT_ID = "-4769470702"
 
 SOLANA_RPC_URL = "https://api.helius.xyz/v0/mainnet-rpc?api-key=ba1232d1-2f57-4cc5-a47f-1c50038a723e"
@@ -21,7 +24,7 @@ MAX_TAX = 5  # Taxe max tolérée (%)
 MAX_HOLDER_SUPPLY = 0.5  # Si un holder a +50% du supply → scam
 VOLUME_PUMP_THRESHOLD = 5  # Multiplication du volume en 10 minutes pour signaler un pump
 
-BIRDEYE_API = "https://public-api.birdeye.so/solana/v1/tokens/new"
+BIRDEYE_API = "https://api.birdeye.so/public/token_price"
 HONEYPOT_API = "https://honeypot-api.com/check/"
 DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/pairs/solana/"
 
@@ -31,28 +34,6 @@ token_volumes = {}
 # ==============================
 # FONCTIONS
 # ==============================
-
-def get_new_tokens():
-    """Récupère les nouveaux tokens listés sur Birdeye."""
-    try:
-        response = requests.get(BIRDEYE_API)
-        if response.status_code == 200:
-            return response.json().get("data", [])
-    except Exception as e:
-        print(f"Erreur API Birdeye : {e}")
-    return []
-
-def filter_tokens(token):
-    """Filtre les tokens en fonction des critères (liquidité, taxes)."""
-    liquidity = token.get("liquidity", 0)
-    buy_tax = token.get("buy_tax", 0)
-    sell_tax = token.get("sell_tax", 0)
-
-    if liquidity < MIN_LIQUIDITY:
-        return False
-    if buy_tax > MAX_TAX or sell_tax > MAX_TAX:
-        return False
-    return True
 
 def check_honeypot(token_address):
     """Vérifie si le token est un honeypot."""
@@ -128,6 +109,41 @@ def check_token_volume(token_address):
         print(f"Erreur API Volume : {e}")
     return False
 
+def get_new_tokens():
+    """Récupère les nouveaux tokens via les transactions Solana."""
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [
+            "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",  
+            {"limit": 10}
+        ]
+    }
+    
+    try:
+        response = requests.post(SOLANA_RPC_URL, json=payload, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            return [tx["signature"] for tx in data.get("result", [])]
+    except Exception as e:
+        print(f"Erreur API Solana : {e}")
+    
+    return []
+
+def filter_tokens(token):
+    """Filtre les tokens selon les critères (liquidité, taxes)."""
+    liquidity = token.get("liquidity", 0)
+    buy_tax = token.get("buy_tax", 0)
+    sell_tax = token.get("sell_tax", 0)
+
+    if liquidity < MIN_LIQUIDITY:
+        return False
+    if buy_tax > MAX_TAX or sell_tax > MAX_TAX:
+        return False
+    return True
+
 def send_telegram_alert(token):
     """Envoie une alerte Telegram pour les bons tokens (sans scam)."""
     message = f"""
@@ -159,23 +175,14 @@ while True:
             print(f"✅ Nouveau token détecté : {token['name']}")
 
             if check_honeypot(token["address"]):
-                print("❌ Honeypot détecté, on ignore ce token.")
                 continue
-
             if check_holder_distribution(token["address"]):
-                print("❌ Trop de supply dans un seul wallet, on ignore ce token.")
                 continue
-
             if not check_contract_renounced(token["address"]):
-                print("❌ Contrat non renoncé, on ignore ce token.")
                 continue
-
             if check_liquidity_lock(token["address"]):
-                print("❌ Liquidité pas bloquée, on ignore ce token.")
                 continue
-
             if check_token_volume(token["address"]):
-                print("🚀 Token en pump détecté ! Envoi d'alerte...")
                 send_telegram_alert(token)
 
-    time.sleep(600)  # Vérification toutes les 10 minutes
+    time.sleep(600)

@@ -234,6 +234,7 @@ print("🚀 Bot de détection de memecoins lancé...")
 
 while True:
     tokens = get_new_tokens()  # Récupération des nouveaux tokens via Jupiter
+    print(f"📢 Debug : réponse get_new_tokens → {tokens}")  # Debug
 
     for token in tokens:
         print(f"📢 Debug : token brut → {token}")  # Voir ce qui est reçu

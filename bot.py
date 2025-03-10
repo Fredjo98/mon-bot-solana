@@ -185,17 +185,28 @@ def check_token_volume(token_address):
     return False
 
 def get_new_tokens():
-    """Récupère les nouveaux tokens listés sur Solana via Jupiter."""
-    try:
-        response = requests.get(JUPITER_API)
+    raw_addresses = JUPITER_API  # Remplace par ton appel API qui renvoie les nouvelles adresses
+    tokens = []
+
+    for address in raw_addresses:
+        # 🔍 Tenter de récupérer les infos du token via une API
+        response = requests.get(f"https://price.jup.ag/v4/price?ids={address}")
+
         if response.status_code == 200:
-            tokens = response.json()
-            return tokens
+            data = response.json()
+            if address in data:
+                tokens.append({
+                    "symbol": data[address].get("symbol", "N/A"),
+                    "mint": address
+                })
+            else:
+                print(f"⚠️ Aucune info trouvée pour {address}, utilisation de valeurs par défaut")
+                tokens.append({"symbol": "N/A", "mint": address})
         else:
-            print(f"Erreur {response.status_code} lors de la récupération des tokens.")
-    except Exception as e:
-        print(f"Erreur API Jupiter : {e}")
-    return []
+            print(f"❌ Erreur API pour {address} : {response.status_code}, utilisation de valeurs par défaut")
+            tokens.append({"symbol": "N/A", "mint": address})
+
+    return tokens
 
 def filter_tokens(token):
     """Filtre les tokens selon les critères (liquidité, taxes)."""

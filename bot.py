@@ -236,6 +236,7 @@ while True:
     tokens = get_new_tokens()  # Récupération des nouveaux tokens via Jupiter
 
     for token in tokens:
+        print(f"📢 Debug : token brut → {token}")  # Voir ce qui est reçu
         print(f"✅ Nouveau token détecté : {token['symbol']} - {token['mint']}")
 
         if check_honeypot(token["address"]):  # Vérifier si c'est un honeypot

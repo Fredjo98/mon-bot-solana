@@ -192,13 +192,10 @@ def check_token_volume(pair_id):
     return False
 
 
-import requests
-
 def get_new_tokens():
     """Récupère les nouvelles paires de trading sur Solana via DexScreener."""
     
-    url = "https://api.dexscreener.com/latest/dex/pairs/solana"
-    
+    url = "https://api.dexscreener.com/latest/dex/search?q=sol"  # Recherche des tokens liés à SOL
     try:
         response = requests.get(url)
         print(f"📢 Debug : Réponse API - {response.status_code}")  # Vérifier la réponse
@@ -219,7 +216,7 @@ def get_new_tokens():
 
         for pair in data["pairs"]:
             if pair["chainId"] != "solana":
-                continue  # On garde seulement les tokens Solana
+                continue  # On garde seulement les tokens sur Solana
             
             symbol = pair["baseToken"]["symbol"]
             if symbol in excluded_symbols:
@@ -233,7 +230,7 @@ def get_new_tokens():
                 "pair_id": pair["pairAddress"]
             })
 
-        print(f"📢 Debug : Tokens détectés - {tokens}")  # Vérifier si des tokens sont récupérés
+        print(f"📢 Debug : Tokens détectés - {tokens}")  # Vérifier les tokens trouvés
         return tokens
 
     except Exception as e:

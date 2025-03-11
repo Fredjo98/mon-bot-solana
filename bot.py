@@ -185,36 +185,36 @@ def check_token_volume(token_address):
     return False
 
 def get_new_tokens():
-    """Récupère les nouveaux tokens listés sur DexScreener"""
-    url = DEXSCREENER_API  # Nouvelle API DexScreener
-    
+    url = "https://api.dexscreener.com/latest/dex/tokens"
+
     try:
         response = requests.get(url)
+
+        if response.status_code != 200:
+            print(f"❌ Erreur API DexScreener : {response.status_code} - {response.text}")
+            return []
+
         data = response.json()
 
         if "pairs" not in data or not data["pairs"]:
-            print("⚠️ Aucun token trouvé sur DexScreener.")
+            print("⚠️ Aucun token trouvé dans la réponse DexScreener.")
             return []
 
         tokens = []
         for pair in data["pairs"]:
-            base_token = pair["baseToken"]
-            token_info = {
-                "name": base_token["name"],
-                "symbol": base_token["symbol"],
-                "address": base_token["address"],
-                "market_cap": pair.get("fdv", "N/A"),
-                "liquidity": pair["liquidity"].get("usd", 0),
-                "buy_tax": pair.get("buyTax", 0),
-                "sell_tax": pair.get("sellTax", 0)
-            }
-            tokens.append(token_info)
+            tokens.append({
+                "symbol": pair["baseToken"]["symbol"],
+                "address": pair["baseToken"]["address"],
+                "liquidity": pair.get("liquidity", {}).get("usd", 0),
+                "market_cap": pair.get("fdv", 0)
+            })
 
         return tokens
 
     except Exception as e:
         print(f"❌ Erreur API DexScreener : {e}")
         return []
+
 
 
 def filter_tokens(token):

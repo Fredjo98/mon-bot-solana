@@ -192,36 +192,38 @@ def check_token_volume(pair_id):
     return False
 
 
+import requests
+
 def get_new_tokens():
     """Récupère les nouvelles paires de trading sur Solana via DexScreener."""
     
-    url = "https://api.dexscreener.com/latest/dex/search?q=solana"
+    url = "https://api.dexscreener.com/latest/dex/pairs/solana"
     
     try:
         response = requests.get(url)
-        print(f"📢 Debug : Réponse API - {response.status_code}")  # 🔍 Voir si l'API répond
+        print(f"📢 Debug : Réponse API - {response.status_code}")  # Vérifier la réponse
 
         if response.status_code != 200:
             print(f"❌ Erreur API DexScreener : {response.status_code} - {response.text}")
             return []
 
         data = response.json()
-        print(f"📢 Debug : Contenu API - {data}")  # 🔍 Voir ce que l'API renvoie
+        print(f"📢 Debug : Contenu API - {data}")  # Voir le contenu
 
         if "pairs" not in data or not data["pairs"]:
             print("⚠️ Aucun token trouvé dans la réponse DexScreener.")
             return []
 
         tokens = []
-        excluded_symbols = {"SOL", "SOLANA"}  # 🔹 Tokens à ignorer
+        excluded_symbols = {"SOL", "SOLANA"}  # Exclure les jetons non pertinents
 
         for pair in data["pairs"]:
             if pair["chainId"] != "solana":
-                continue  # On garde seulement les tokens sur Solana
+                continue  # On garde seulement les tokens Solana
             
             symbol = pair["baseToken"]["symbol"]
             if symbol in excluded_symbols:
-                continue  # 🔥 On ignore SOL et SOLANA
+                continue  # Ignorer SOL et SOLANA
 
             tokens.append({
                 "symbol": symbol,
@@ -231,12 +233,13 @@ def get_new_tokens():
                 "pair_id": pair["pairAddress"]
             })
 
-        print(f"📢 Debug : Tokens détectés - {tokens}")  # 🔍 Vérifier si des tokens sont récupérés
+        print(f"📢 Debug : Tokens détectés - {tokens}")  # Vérifier si des tokens sont récupérés
         return tokens
 
     except Exception as e:
         print(f"❌ Erreur API DexScreener : {e}")
         return []
+
 
 
 

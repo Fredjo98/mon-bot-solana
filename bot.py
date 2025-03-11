@@ -199,12 +199,14 @@ def get_new_tokens():
     
     try:
         response = requests.get(url)
-        
+        print(f"📢 Debug : Réponse API - {response.status_code}")  # 🔍 Voir si l'API répond
+
         if response.status_code != 200:
             print(f"❌ Erreur API DexScreener : {response.status_code} - {response.text}")
             return []
 
         data = response.json()
+        print(f"📢 Debug : Contenu API - {data}")  # 🔍 Voir ce que l'API renvoie
 
         if "pairs" not in data or not data["pairs"]:
             print("⚠️ Aucun token trouvé dans la réponse DexScreener.")
@@ -229,11 +231,13 @@ def get_new_tokens():
                 "pair_id": pair["pairAddress"]
             })
 
+        print(f"📢 Debug : Tokens détectés - {tokens}")  # 🔍 Vérifier si des tokens sont récupérés
         return tokens
 
     except Exception as e:
         print(f"❌ Erreur API DexScreener : {e}")
         return []
+
 
 
 

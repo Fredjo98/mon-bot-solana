@@ -211,17 +211,22 @@ def get_new_tokens():
             return []
 
         tokens = []
+        excluded_symbols = {"SOL", "SOLANA"}  # 🔹 Tokens à ignorer
+
         for pair in data["pairs"]:
-            # 🔹 Filtrer uniquement les paires sur Solana
             if pair["chainId"] != "solana":
-                continue  
+                continue  # On garde seulement les tokens sur Solana
+            
+            symbol = pair["baseToken"]["symbol"]
+            if symbol in excluded_symbols:
+                continue  # 🔥 On ignore SOL et SOLANA
 
             tokens.append({
-                "symbol": pair["baseToken"]["symbol"],
+                "symbol": symbol,
                 "address": pair["baseToken"]["address"],
                 "liquidity": pair.get("liquidity", {}).get("usd", 0),
                 "market_cap": pair.get("fdv", 0),
-                "pair_id": pair["pairAddress"]  # 🔹 On récupère l'adresse de la paire
+                "pair_id": pair["pairAddress"]
             })
 
         return tokens
@@ -229,6 +234,7 @@ def get_new_tokens():
     except Exception as e:
         print(f"❌ Erreur API DexScreener : {e}")
         return []
+
 
 
 

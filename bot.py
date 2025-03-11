@@ -212,6 +212,10 @@ def get_new_tokens():
 
         tokens = []
         for pair in data["pairs"]:
+            # 🔹 Filtrer uniquement les paires sur Solana
+            if pair["chainId"] != "solana":
+                continue  
+
             tokens.append({
                 "symbol": pair["baseToken"]["symbol"],
                 "address": pair["baseToken"]["address"],
@@ -225,6 +229,7 @@ def get_new_tokens():
     except Exception as e:
         print(f"❌ Erreur API DexScreener : {e}")
         return []
+
 
 
 

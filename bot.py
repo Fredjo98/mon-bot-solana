@@ -25,7 +25,7 @@ MAX_HOLDER_SUPPLY = 0.5  # Si un holder a +50% du supply → scam
 VOLUME_PUMP_THRESHOLD = 5  # Multiplication du volume en 10 minutes pour signaler un pump
 
 JUPITER_API = "https://quote-api.jup.ag/v6/tokens"
-DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/search?q="
+DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
 
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 token_volumes = {}
@@ -128,7 +128,7 @@ def check_contract_renounced(token_address):
 def check_liquidity_lock(token_address):
     """Vérifie si la liquidité est bloquée en analysant la pool sur Raydium."""
     
-    url = f"https://api.dexscreener.com/latest/dex/search?q={token_address}"
+    url = f"{DEXSCREENER_API}{token_address}"
     
     try:
         response = requests.get(url)
@@ -185,28 +185,37 @@ def check_token_volume(token_address):
     return False
 
 def get_new_tokens():
-    raw_addresses = JUPITER_API  # Remplace par ton appel API qui renvoie les nouvelles adresses
-    tokens = []
+    """Récupère les nouveaux tokens listés sur DexScreener"""
+    url = DEXSCREENER_API  # Nouvelle API DexScreener
+    
+    try:
+        response = requests.get(url)
+        data = response.json()
 
-    for address in raw_addresses:
-        # 🔍 Tenter de récupérer les infos du token via une API
-        response = requests.get(f"https://price.jup.ag/v4/price?ids={address}")
+        if "pairs" not in data or not data["pairs"]:
+            print("⚠️ Aucun token trouvé sur DexScreener.")
+            return []
 
-        if response.status_code == 200:
-            data = response.json()
-            if address in data:
-                tokens.append({
-                    "symbol": data[address].get("symbol", "N/A"),
-                    "mint": address
-                })
-            else:
-                print(f"⚠️ Aucune info trouvée pour {address}, utilisation de valeurs par défaut")
-                tokens.append({"symbol": "N/A", "mint": address})
-        else:
-            print(f"❌ Erreur API pour {address} : {response.status_code}, utilisation de valeurs par défaut")
-            tokens.append({"symbol": "N/A", "mint": address})
+        tokens = []
+        for pair in data["pairs"]:
+            base_token = pair["baseToken"]
+            token_info = {
+                "name": base_token["name"],
+                "symbol": base_token["symbol"],
+                "address": base_token["address"],
+                "market_cap": pair.get("fdv", "N/A"),
+                "liquidity": pair["liquidity"].get("usd", 0),
+                "buy_tax": pair.get("buyTax", 0),
+                "sell_tax": pair.get("sellTax", 0)
+            }
+            tokens.append(token_info)
 
-    return tokens
+        return tokens
+
+    except Exception as e:
+        print(f"❌ Erreur API DexScreener : {e}")
+        return []
+
 
 def filter_tokens(token):
     """Filtre les tokens selon les critères (liquidité, taxes)."""
@@ -244,11 +253,18 @@ def send_telegram_alert(token):
 print("🚀 Bot de détection de memecoins lancé...")
 
 while True:
-    tokens = get_new_tokens()  # Récupération des nouveaux tokens via Jupiter
+    tokens = get_new_tokens()  # Récupération des nouveaux tokens via Dexscreener
+    
+    if not tokens:  # Vérifier si la liste est vide
+        print("⚠️ Aucun nouveau token détecté. Attente avant nouvelle recherche...")
+        time.sleep(600)  # Pause de 10 minutes avant de réessayer
+        continue
 
     for token in tokens:
-        print(f"📢 Debug : token brut → {token}")  # Voir ce qui est reçu
-        print(f"✅ Nouveau token détecté : {token['symbol']} - {token['mint']}")
+        print(f"📢 Debug : token brut → {token}")  # Affichage complet pour vérification
+        print(f"✅ Nouveau token détecté : {token['symbol']} - {token['address']}")
+        print(f"💰 Liquidité : {token['liquidity']}$ | 🏦 Market Cap : {token['market_cap']}$")
+
 
         if check_honeypot(token["address"]):  # Vérifier si c'est un honeypot
             continue

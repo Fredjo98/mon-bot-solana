@@ -25,7 +25,8 @@ MAX_HOLDER_SUPPLY = 0.5  # Si un holder a +50% du supply → scam
 VOLUME_PUMP_THRESHOLD = 5  # Multiplication du volume en 10 minutes pour signaler un pump
 
 JUPITER_API = "https://quote-api.jup.ag/v6/tokens"
-DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
+DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/search?q=solana"
+
 
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 token_volumes = {}
@@ -157,39 +158,48 @@ def check_liquidity_lock(token_address):
     return False
 
 
-def check_token_volume(token_address):
+def check_token_volume(pair_id):
     """Vérifie l'évolution du volume d'un token et détecte un pump."""
-    url = f"{DEXSCREENER_API}{token_address}"
+    url = f"https://api.dexscreener.com/latest/dex/pairs/solana/{pair_id}"
+
     try:
         response = requests.get(url)
+        
+        if response.status_code != 200:
+            print(f"❌ Erreur API Volume DexScreener : {response.status_code} - {response.text}")
+            return False
+
         data = response.json()
         
         if "pairs" not in data or not data["pairs"]:
-            print(f"⚠️ Aucun volume trouvé pour {token_address} sur DexScreener.")
+            print(f"⚠️ Aucun volume trouvé pour {pair_id} sur DexScreener.")
             return False
-        
+
         volume_24h = data["pairs"][0]["volume"]["h24"]
 
         # Suivi du volume toutes les 10 minutes
-        if token_address in token_volumes:
-            old_volume = token_volumes[token_address]
+        if pair_id in token_volumes:
+            old_volume = token_volumes[pair_id]
             if volume_24h > old_volume * VOLUME_PUMP_THRESHOLD:
-                print(f"🚀 PUMP DETECTÉ : {token_address} x{VOLUME_PUMP_THRESHOLD} en volume !")
+                print(f"🚀 PUMP DETECTÉ : {pair_id} x{VOLUME_PUMP_THRESHOLD} en volume !")
                 return True
 
-        token_volumes[token_address] = volume_24h
+        token_volumes[pair_id] = volume_24h
 
     except Exception as e:
         print(f"Erreur API Volume DexScreener : {e}")
-    
+
     return False
 
-def get_new_tokens():
-    url = "https://api.dexscreener.com/latest/dex/tokens"
 
+def get_new_tokens():
+    """Récupère les nouvelles paires de trading sur Solana via DexScreener."""
+    
+    url = "https://api.dexscreener.com/latest/dex/search?q=solana"
+    
     try:
         response = requests.get(url)
-
+        
         if response.status_code != 200:
             print(f"❌ Erreur API DexScreener : {response.status_code} - {response.text}")
             return []
@@ -206,7 +216,8 @@ def get_new_tokens():
                 "symbol": pair["baseToken"]["symbol"],
                 "address": pair["baseToken"]["address"],
                 "liquidity": pair.get("liquidity", {}).get("usd", 0),
-                "market_cap": pair.get("fdv", 0)
+                "market_cap": pair.get("fdv", 0),
+                "pair_id": pair["pairAddress"]  # 🔹 On récupère l'adresse de la paire
             })
 
         return tokens
@@ -214,6 +225,7 @@ def get_new_tokens():
     except Exception as e:
         print(f"❌ Erreur API DexScreener : {e}")
         return []
+
 
 
 
@@ -253,18 +265,11 @@ def send_telegram_alert(token):
 print("🚀 Bot de détection de memecoins lancé...")
 
 while True:
-    tokens = get_new_tokens()  # Récupération des nouveaux tokens via Dexscreener
-    
-    if not tokens:  # Vérifier si la liste est vide
-        print("⚠️ Aucun nouveau token détecté. Attente avant nouvelle recherche...")
-        time.sleep(600)  # Pause de 10 minutes avant de réessayer
-        continue
+    tokens = get_new_tokens()  # 🔹 Récupération des nouveaux tokens via DexScreener
 
     for token in tokens:
-        print(f"📢 Debug : token brut → {token}")  # Affichage complet pour vérification
+        print(f"📢 Debug : token brut → {token}")  # Voir ce qui est reçu
         print(f"✅ Nouveau token détecté : {token['symbol']} - {token['address']}")
-        print(f"💰 Liquidité : {token['liquidity']}$ | 🏦 Market Cap : {token['market_cap']}$")
-
 
         if check_honeypot(token["address"]):  # Vérifier si c'est un honeypot
             continue
@@ -274,8 +279,9 @@ while True:
             continue
         if not check_liquidity_lock(token["address"]):  # Vérifier si la liquidité est bloquée
             continue
-        if check_token_volume(token["address"]):  # Détection de pump (hausse anormale de volume)
+        if check_token_volume(token["pair_id"]):  # 🔹 Utilisation du pair_id pour vérifier le volume
             send_telegram_alert(token)  # Envoi d'une alerte Telegram
 
-    time.sleep(600)  # Pause de 10 minutes avant de relancer
+    time.sleep(600)  # Pause de 10 minutes
+
 

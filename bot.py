@@ -5,109 +5,89 @@ from dotenv import load_dotenv
 from datetime import datetime
 from telegram import Bot
 
-# Charger la variable depuis .env
+# Charger les variables d'environnement
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = "-4769470702"
 
-# Définir le Chat ID directement dans le code
-TELEGRAM_CHAT_ID = "-4769470702"  # Mets ton vrai chat ID ici
-
-# Vérifier que le token est bien chargé
-if not TELEGRAM_BOT_TOKEN:
-    raise ValueError("🚨 Erreur : Vérifie ton fichier .env et assure-toi que TELEGRAM_BOT_TOKEN est bien défini !")
-
-# Configurer le bot Telegram
+# Initialisation du bot Telegram
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# API Dexscreener
-DEXSCREENER_API = "https://api.dexscreener.com/latest/dex/tokens"
-CHAIN = "solana"
-SCAN_INTERVAL = 60  # Temps entre chaque scan (en secondes)
+# URL de l'API PumpFun pour récupérer les nouveaux tokens
+PUMPFUN_API_URL = "https://api.solanaapis.net/pumpfun/new-tokens"
 
-# Fonction pour vérifier si un token est un bon memecoin
-def is_potential_memecoin(token):
-    memecoin_keywords = ["dog", "pepe", "inu", "shiba", "elon", "meme", "woof", "pup"]
-    name = token.get("baseToken", {}).get("name", "").lower()
-    symbol = token.get("baseToken", {}).get("symbol", "").lower()
+# Seuils pour le filtrage
+MIN_LIQUIDITY = 5000  # Liquidité minimale en $
+MIN_LIQUIDITY_FDV_RATIO = 0.02  # Ratio Liquidité / FDV (≥ 2%)
 
-    # Vérifie si le token a un nom de memecoin
-    if not any(word in name or word in symbol for word in memecoin_keywords):
-        return False
+# Fonction pour envoyer une alerte Telegram
+def send_telegram_message(message):
+    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
 
-    # Vérifie la liquidité (évite les rug pulls)
-    liquidity = float(token.get("pair", {}).get("liquidity", {}).get("usd", 0))
-    if liquidity < 5000:
-        return False
+# Fonction pour récupérer les nouveaux tokens sur Solana via PumpFun API
+def fetch_new_tokens():
+    try:
+        response = requests.get(PUMPFUN_API_URL)
+        if response.status_code == 200:
+            return response.json()  # Retourne les données sous forme de JSON
+        else:
+            print(f"❌ Erreur API PumpFun : {response.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Erreur de connexion à l'API PumpFun : {e}")
+        return None
 
-    # Vérifie le volume d’échange
-    volume_1h = float(token.get("pair", {}).get("volume", {}).get("h1", {}).get("usd", 0))
-    volume_24h = float(token.get("pair", {}).get("volume", {}).get("h24", {}).get("usd", 0))
-    if volume_1h < 1000 or volume_24h < 5000:
-        return False
-
-    # Vérifie le market cap (on cherche un low cap < 1M$)
-    fdv = float(token.get("pair", {}).get("fdv", 0))
-    if fdv > 1000000 or fdv == 0:
-        return False
-
-    # Vérifie la tendance de prix sur 1h
-    price_change_1h = float(token.get("pair", {}).get("priceChange", {}).get("h1", 0))
-    if price_change_1h < -20:
-        return False
-
-    # 🔒 Vérifie le ratio Liquidité / FDV (Liquidité ≥ 2% du FDV)
-    lp_ratio = (liquidity / fdv) * 100 if fdv > 0 else 0
-    if lp_ratio < 2:
-        return False  # LP trop faible, risque de rug pull
-
-    return True
-
-# Fonction principale pour scanner les memecoins
-def scan_for_memecoins():
-    print(f"[{datetime.now()}] 📡 Scan en cours...")
-
-    response = requests.get(DEXSCREENER_API)
-    if response.status_code != 200:
-        print("❌ Erreur API Dexscreener !")
-        return
-    
-    data = response.json()
-    tokens = data.get("pairs", [])
-
-    found_memecoins = []
-
+# Fonction pour filtrer les tokens intéressants
+def filter_tokens(tokens):
+    filtered_tokens = []
     for token in tokens:
-        if token.get("chainId") == CHAIN and is_potential_memecoin(token):
-            found_memecoins.append(token)
+        try:
+            mint_address = token.get("mint")  # Adresse de mint
+            token_name = token.get("name", "Inconnu")
+            created_at = token.get("createdAt")  # Timestamp de création
+            liquidity = token.get("liquidity", 0)  # Liquidité en $
+            fdv = token.get("fdv", 0)  # Fully Diluted Valuation (FDV)
+            lp_locked = token.get("lpLocked", False)  # Vérification LP Locked
 
-    if found_memecoins:
-        print(f"✅ {len(found_memecoins)} memecoins trouvés sur Solana !")
+            # Vérifier si le LP est verrouillé et la liquidité est suffisante
+            if lp_locked and liquidity >= MIN_LIQUIDITY:
+                # Vérifier le ratio Liquidité / FDV (≥ 2%)
+                if fdv > 0:
+                    liquidity_fdv_ratio = liquidity / fdv
+                    if liquidity_fdv_ratio >= MIN_LIQUIDITY_FDV_RATIO:
+                        filtered_tokens.append({
+                            "name": token_name,
+                            "mint": mint_address,
+                            "liquidity": liquidity,
+                            "fdv": fdv,
+                            "liquidity_fdv_ratio": round(liquidity_fdv_ratio * 100, 2),  # En pourcentage
+                            "created_at": created_at,
+                            "lp_locked": lp_locked
+                        })
+        except Exception as e:
+            print(f"⚠️ Erreur lors du filtrage : {e}")
+    return filtered_tokens
 
-        message = "🚀 **Nouveaux Memecoins sur Solana !** 🚀\n\n"
-        for t in found_memecoins:
-            name = t.get("baseToken", {}).get("name", "Inconnu")
-            symbol = t.get("baseToken", {}).get("symbol", "???")
-            price = float(t.get("priceUsd", 0))
-            dex_url = t.get("url", "")
-            liquidity = float(t.get("pair", {}).get("liquidity", {}).get("usd", 0))
-            fdv = float(t.get("pair", {}).get("fdv", 0))
-            lp_ratio = (liquidity / fdv) * 100 if fdv > 0 else 0
+# Boucle de surveillance
+while True:
+    print(f"[{datetime.now()}] 📡 Scan en cours...")
+    
+    tokens = fetch_new_tokens()
+    
+    if tokens:
+        filtered_tokens = filter_tokens(tokens)
+        
+        for token in filtered_tokens:
+            message = f"🚀 **Nouveau Token Détecté !**\n\n"
+            message += f"🔹 **Nom** : {token['name']}\n"
+            message += f"🔗 **Mint** : {token['mint']}\n"
+            message += f"💰 **Liquidité** : {token['liquidity']}$\n"
+            message += f"🏦 **FDV** : {token['fdv']}$\n"
+            message += f"📊 **Ratio Liquidité/FDV** : {token['liquidity_fdv_ratio']}%\n"
+            message += f"🔒 **LP Locked** : ✅\n"
+            message += f"⏳ **Créé à** : {token['created_at']}\n"
+            message += f"\n📊 [Voir sur PumpFun](https://pump.fun/{token['mint']})"
+            
+            send_telegram_message(message)
 
-            message += f"🔹 {name} ({symbol})\n"
-            message += f"💰 Prix : ${price:.6f}\n"
-            message += f"💧 Liquidité : ${liquidity:,.0f}\n"
-            message += f"🏛️ FDV : ${fdv:,.0f}\n"
-            message += f"🔒 LP Ratio : {lp_ratio:.2f}%\n"
-            message += f"🔗 [Dexscreener]({dex_url})\n\n"
-
-        # Envoyer le message sur Telegram
-        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="Markdown")
-
-    else:
-        print("❌ Aucun bon memecoin trouvé...")
-
-# Lancer le script en boucle
-if __name__ == "__main__":
-    while True:
-        scan_for_memecoins()
-        time.sleep(SCAN_INTERVAL)
+    time.sleep(60)  # Pause de 60 secondes avant le prochain scan

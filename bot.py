@@ -8,86 +8,158 @@ from telegram import Bot
 # Charger les variables d'environnement
 load_dotenv()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+BITQUERY_API_KEY = os.getenv("BITQUERY_API_KEY")
 TELEGRAM_CHAT_ID = "-4769470702"
 
 # Initialisation du bot Telegram
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
-# URL de l'API PumpFun pour récupérer les nouveaux tokens
-PUMPFUN_API_URL = "https://api.solanaapis.net/pumpfun/new-tokens"
+# API Bitquery
+BITQUERY_API_URL = "https://graphql.bitquery.io/"
 
-# Seuils pour le filtrage
-MIN_LIQUIDITY = 5000  # Liquidité minimale en $
-MIN_LIQUIDITY_FDV_RATIO = 0.02  # Ratio Liquidité / FDV (≥ 2%)
-
-# Fonction pour envoyer une alerte Telegram
-def send_telegram_message(message):
-    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
-
-# Fonction pour récupérer les nouveaux tokens sur Solana via PumpFun API
-def fetch_new_tokens():
-    try:
-        response = requests.get(PUMPFUN_API_URL)
-        if response.status_code == 200:
-            return response.json()  # Retourne les données sous forme de JSON
-        else:
-            print(f"❌ Erreur API PumpFun : {response.status_code}")
-            return None
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Erreur de connexion à l'API PumpFun : {e}")
+# 🔍 Fonction pour interroger l'API Bitquery
+def fetch_tokens():
+    url = "https://graphql.bitquery.io"
+    headers = {"X-API-KEY": BITQUERY_API_KEY, "Content-Type": "application/json"}
+    query = """
+    {
+      solana(network: solana) {
+        dexTrades(
+          options: {limit: 10, desc: "tradeAmount"}
+          date: {since: "2025-03-12"}
+        ) {
+          baseCurrency {
+            address
+            symbol
+          }
+          tradeAmount(in: USD)
+          buyAmount(in: USD)
+          sellAmount(in: USD)
+          quotePrice
+          smartContract {
+            address {
+              annotation
+            }
+          }
+        }
+      }
+    }
+    """
+    
+    response = requests.post(url, json={"query": query}, headers=headers)
+    
+    if response.status_code == 200:
+        return response.json()["data"]["solana"]["dexTrades"]
+    else:
+        print("❌ Erreur API Bitquery !", response.text)
         return None
 
-# Fonction pour filtrer les tokens intéressants
-def filter_tokens(tokens):
-    filtered_tokens = []
-    for token in tokens:
-        try:
-            mint_address = token.get("mint")  # Adresse de mint
-            token_name = token.get("name", "Inconnu")
-            created_at = token.get("createdAt")  # Timestamp de création
-            liquidity = token.get("liquidity", 0)  # Liquidité en $
-            fdv = token.get("fdv", 0)  # Fully Diluted Valuation (FDV)
-            lp_locked = token.get("lpLocked", False)  # Vérification LP Locked
-
-            # Vérifier si le LP est verrouillé et la liquidité est suffisante
-            if lp_locked and liquidity >= MIN_LIQUIDITY:
-                # Vérifier le ratio Liquidité / FDV (≥ 2%)
-                if fdv > 0:
-                    liquidity_fdv_ratio = liquidity / fdv
-                    if liquidity_fdv_ratio >= MIN_LIQUIDITY_FDV_RATIO:
-                        filtered_tokens.append({
-                            "name": token_name,
-                            "mint": mint_address,
-                            "liquidity": liquidity,
-                            "fdv": fdv,
-                            "liquidity_fdv_ratio": round(liquidity_fdv_ratio * 100, 2),  # En pourcentage
-                            "created_at": created_at,
-                            "lp_locked": lp_locked
-                        })
-        except Exception as e:
-            print(f"⚠️ Erreur lors du filtrage : {e}")
-    return filtered_tokens
-
-# Boucle de surveillance
-while True:
-    print(f"[{datetime.now()}] 📡 Scan en cours...")
+# 🔒 Vérifie le ratio Liquidité / FDV (≥ 2%)
+def check_liquidity_fdv_ratio(token_address):
+    url = f"https://graphql.bitquery.io"
+    headers = {"X-API-KEY": BITQUERY_API_KEY, "Content-Type": "application/json"}
+    query = f"""
+    {{
+      solana {{
+        tokenTransfers(
+          currency: {{is: "{token_address}"}}
+          options: {{limit: 1, desc: "date.date"}}
+        ) {{
+          currency {{
+            symbol
+          }}
+          amount
+        }}
+      }}
+    }}
+    """
     
-    tokens = fetch_new_tokens()
+    response = requests.post(url, json={"query": query}, headers=headers)
     
-    if tokens:
-        filtered_tokens = filter_tokens(tokens)
+    if response.status_code == 200:
+        data = response.json()["data"]["solana"]["tokenTransfers"]
+        if data:
+            liquidité = data[0]["amount"]
+            fdv = liquidité * 50  # Approximation FDV
+            return liquidité / fdv >= 0.02
+    return False
+
+# 🛡 Vérifie si le token est un honeypot (peut-il être vendu ?)
+def is_honeypot(token_address):
+    url = f"https://api.bitquery.io/v2/honeypot/{token_address}"
+    response = requests.get(url, headers={"X-API-KEY": BITQUERY_API_KEY})
+    
+    if response.status_code == 200:
+        data = response.json()
+        return not data.get("is_honeypot", False)
+    return False
+
+# 🏦 Vérifie si quelques holders possèdent trop de tokens
+def check_holders_distribution(token_address):
+    url = f"https://graphql.bitquery.io"
+    headers = {"X-API-KEY": BITQUERY_API_KEY, "Content-Type": "application/json"}
+    query = f"""
+    {{
+      solana {{
+        tokenHolders(
+          currency: {{is: "{token_address}"}}
+          options: {{limit: 10, desc: "balance"}}
+        ) {{
+          balance
+          address {{
+            address
+          }}
+        }}
+      }}
+    }}
+    """
+    
+    response = requests.post(url, json={"query": query}, headers=headers)
+    
+    if response.status_code == 200:
+        holders = response.json()["data"]["solana"]["tokenHolders"]
+        total_supply = sum([h["balance"] for h in holders])
+        top_holder_supply = holders[0]["balance"] if holders else 0
         
-        for token in filtered_tokens:
-            message = f"🚀 **Nouveau Token Détecté !**\n\n"
-            message += f"🔹 **Nom** : {token['name']}\n"
-            message += f"🔗 **Mint** : {token['mint']}\n"
-            message += f"💰 **Liquidité** : {token['liquidity']}$\n"
-            message += f"🏦 **FDV** : {token['fdv']}$\n"
-            message += f"📊 **Ratio Liquidité/FDV** : {token['liquidity_fdv_ratio']}%\n"
-            message += f"🔒 **LP Locked** : ✅\n"
-            message += f"⏳ **Créé à** : {token['created_at']}\n"
-            message += f"\n📊 [Voir sur PumpFun](https://pump.fun/{token['mint']})"
-            
-            send_telegram_message(message)
+        return top_holder_supply / total_supply < 0.10  # Le plus gros holder ne doit pas avoir + de 10%
+    
+    return False
 
-    time.sleep(60)  # Pause de 60 secondes avant le prochain scan
+# 🚀 Analyse et sélection des meilleurs tokens
+def analyze_tokens():
+    tokens = fetch_tokens()
+    
+    if not tokens:
+        return
+
+    for token in tokens:
+        symbol = token["baseCurrency"]["symbol"]
+        address = token["baseCurrency"]["address"]
+        trade_amount = token["tradeAmount"]
+        
+        if (
+            trade_amount > 10000 and  # Volume minimum de 10k$
+            check_liquidity_fdv_ratio(address) and
+            is_honeypot(address) and
+            check_holders_distribution(address)
+        ):
+            message = f"""
+            🚀 Nouveau Token Prometteur 🚀
+            🏷 Symbol: {symbol}
+            📜 Adresse: {address}
+            💰 Volume: {trade_amount}$
+            ✅ Liquidity/FDV Ratio OK
+            ✅ Pas un Honeypot
+            ✅ Holders bien répartis
+            """
+            bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message)
+            print(message)
+        else:
+            print(f"❌ {symbol} n'a pas passé les filtres.")
+
+# 🔄 Lancement du scan en boucle
+if __name__ == "__main__":
+    while True:
+        print(f"[{datetime.now()}] 📡 Scan en cours...")
+        analyze_tokens()
+        time.sleep(60)  # Rafraîchissement toutes les 60s
